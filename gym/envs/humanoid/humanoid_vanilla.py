@@ -53,10 +53,6 @@ class HumanoidVanilla(LeggedRobot):
         self.CoM = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
         self.total_weight = self.mass_total * (-self.cfg.sim.gravity[2])
 
-        # [추가] 필터링된 속도를 저장할 변수 (EMA 필터용)
-        self.smooth_lin_vel = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
-        self.vel_alpha = 0.05 # 필터 계수 (0에 가까울수록 더 부드럽지만 반응이 느려짐)
-
         if self.cfg.terrain.measure_heights:
             self.measured_heights_obs = torch.zeros_like(self.measured_heights)  
 
@@ -176,10 +172,7 @@ class HumanoidVanilla(LeggedRobot):
         self.phase_sin = torch.sin(2*torch.pi*self.phase)
         self.phase_cos = torch.cos(2*torch.pi*self.phase)
 
-        # self.base_lin_vel_world = self.root_states[:, 7:10].clone()
-        current_vel = self.root_states[:, 7:10]
-        self.smooth_lin_vel = self.vel_alpha * current_vel + (1 - self.vel_alpha) * self.smooth_lin_vel
-        self.base_lin_vel_world = self.smooth_lin_vel
+        self.base_lin_vel_world = self.root_states[:, 7:10].clone()
 
 
         if self.cfg.terrain.measure_heights:
