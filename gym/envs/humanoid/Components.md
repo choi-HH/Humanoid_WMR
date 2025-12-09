@@ -8,6 +8,6 @@
 | Phase Cos | 1 | ✓ | ✓ | ✓ |
 | Joint Positions | 12 | ✓ | ✓ | ✓ |
 | Joint Velocities | 12 | ✓ | ✓ | ✓ |
-| Base Height | 3 |  | ✓ | ✓ |
+| Base Height | 1 |  | ✓ | ✓ |
 | Base velocity | 1 | | ✓ | ✓ |
 | **Total** | 40 | 36 | 40 | 40 |
