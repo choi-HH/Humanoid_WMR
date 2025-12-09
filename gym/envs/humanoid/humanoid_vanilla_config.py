@@ -349,9 +349,9 @@ class HumanoidVanillaRunnerCfg(LeggedRobotRunnerCfg):
     do_wandb = True
     seed = -1
 
-    class MLP_Encoder:
-            output_detach = True
-            hidden_dims = [256, 256, 256]
+    class WMR_Estimator:
+            # output_detach = True
+            # hidden_dims = [256, 256, 256]
             activation = 'elu'
 
             obs_history = ["base_height",
@@ -364,7 +364,7 @@ class HumanoidVanillaRunnerCfg(LeggedRobotRunnerCfg):
                            "dof_pos",
                            "dof_vel",] # encoder obs
 
-            num_output_dim = 3  # latent vector dimension
+            num_output_dim = 256
 
     class policy(LeggedRobotRunnerCfg.policy):
         init_noise_std = 1.0
@@ -423,14 +423,14 @@ class HumanoidVanillaRunnerCfg(LeggedRobotRunnerCfg):
             desired_kl = 0.01
             max_grad_norm = 1.
 
-            # Encoder 관련 하이퍼파라미터 추가
+            # Estimator 관련 하이퍼파라미터 추가
             est_learning_rate = 1.e-3
             critic_take_latent = False  # True: encoder 출력값 + critic obs 같이 사용, False: encoder 출력값만 사용
 
     class runner(LeggedRobotRunnerCfg.runner):
-        encoder_class_name = 'MLP_Encoder'
-        # policy_class_name = 'ActorCritic'
-        # algorithm_class_name = 'PPO'
+        estimator_class_name = 'WMR_Estimator'
+        policy_class_name = 'ActorCritic'
+        algorithm_class_name = 'PPO'
         num_steps_per_env = 24
         max_iterations = 5000
         run_name = 'full'

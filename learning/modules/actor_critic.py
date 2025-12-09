@@ -37,9 +37,6 @@ class ActorCritic(nn.Module):
                              normalize_obs)
         # ==========================
 
-        print(f"Actor MLP: {self.actor.mean_NN}")
-        print(f"Critic MLP: {self.critic.NN}")
-
     @property
     def action_mean(self):
         return self.actor.action_mean

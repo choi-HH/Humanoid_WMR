@@ -37,7 +37,7 @@ import wandb
 import torch
 
 from learning.algorithms import PPO
-from learning.modules import MLP_Encoder
+from learning.modules import WMR_Estimator
 from learning.modules import ActorCritic
 from learning.utils import Logger
 from learning.env import VecEnv
@@ -51,21 +51,22 @@ class OnPolicyRunner:
                  device='cpu'):
         
         self.cfg = train_cfg["runner"] # config에서 runner 설정 불러오기
-        self.ecd_cfg = train_cfg[self.cfg["encoder_class_name"]] # MLP_Encoder 설정 불러오기
+        self.est_cfg = train_cfg[self.cfg["estimator_class_name"]] # WMR_Estimator 설정 불러오기
         self.alg_cfg = train_cfg["algorithm"][self.cfg["algorithm_class_name"]] # config에서 PPO 설정 불러오기
         self.policy_cfg = train_cfg["policy"]
         self.logging_cfg = train_cfg["logging"]
         self.device = device
         self.env = env
 
-        obs_history_list = self.ecd_cfg["obs_history"] # cfg에서 obs history 설정 불러오기
+        obs_history_list = self.est_cfg["obs_history"] # cfg에서 obs history 설정 불러오기
         num_obs_history_step = self.get_obs_size(obs_history_list) # step당 obs history 차원 계산
         obs_history_length = self.env.cfg.env.obs_history_length # obs history 길이
         num_input_dim = num_obs_history_step * obs_history_length # 전체 obs history 차원 계산
 
-        self.ecd_cfg["num_input_dim"] = num_input_dim # MLP_Encoder 설정에 obs history 차원 반영
+        self.est_cfg["num_input_dim"] = num_input_dim # WMR_Estimator 설정에 obs history 차원 반영
+        self.est_cfg["num_obs_dim"] = num_obs_history_step # WMR_Estimator 설정에 obs history step 차원 반영
 
-        self.encoder = eval(self.cfg["encoder_class_name"])(**self.ecd_cfg).to(self.device) # MLP_Encoder 생성
+        self.encoder = eval(self.cfg["estimator_class_name"])(**self.est_cfg).to(self.device) # WMR_Estimator 생성
         self.num_actor_obs = self.get_obs_size(self.policy_cfg["actor_obs"])
         self.num_critic_obs = self.get_obs_size(self.policy_cfg["critic_obs"])
         if self.alg_cfg["critic_take_latent"]: # config에서 critic_take_latent=True이면
@@ -92,7 +93,7 @@ class OnPolicyRunner:
                               self.num_steps_per_env, 
                               self.num_actor_obs, 
                               self.num_critic_obs,
-                              self.ecd_cfg["num_input_dim"], # obs history 차원
+                              self.est_cfg["num_input_dim"], # obs history 차원
                               self.num_actions)
         
         self.tot_timesteps = 0
@@ -106,6 +107,8 @@ class OnPolicyRunner:
         self.logger.initialize_buffers(self.env.num_envs, reward_keys_to_log)
 
         self.env.reset()
+
+        self.log_architecture()
 
     def attach_to_wandb(self, wandb, log_freq=100, log_graph=True):
         wandb.watch((self.alg.actor_critic.actor,
@@ -123,7 +126,7 @@ class OnPolicyRunner:
         actor_obs = self.get_noisy_obs(self.policy_cfg["actor_obs"])
         # critic_obs = self.get_noisy_obs(self.policy_cfg["critic_obs"])
         critic_obs = self.get_obs(self.policy_cfg["critic_obs"])
-        # obs_history = self.get_obs(self.ecd_cfg["obs_history"]) # obs history 불러오기
+        # obs_history = self.get_obs(self.est_cfg["obs_history"]) # obs history 불러오기
         obs_history = self.env.get_observation_history()
 
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
@@ -264,7 +267,7 @@ class OnPolicyRunner:
 
         self.logger.add_log({
             "Loss/value_function": locs['mean_value_loss'],
-            "Loss/encoder": locs['mean_extra_loss'],
+            "Loss/estimator": locs['mean_extra_loss'],
             "Loss/surrogate": locs['mean_surrogate_loss'],
             "Loss/learning_rate": self.alg.learning_rate,
             "Policy/mean_noise_std": mean_std.item(),
@@ -291,7 +294,7 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Encoder loss:':>{pad}} {locs['mean_extra_loss']:.4f}\n"""
+                          f"""{'Estimator loss:':>{pad}} {locs['mean_extra_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
@@ -303,7 +306,7 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Encoder loss:':>{pad}} {locs['mean_extra_loss']:.4f}\n"""
+                          f"""{'Estimator loss:':>{pad}} {locs['mean_extra_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
 
         log_string += ep_string
@@ -341,9 +344,103 @@ class OnPolicyRunner:
     def get_inference_actions(self):
         obs = self.get_obs(self.policy_cfg["actor_obs"]) # 현재 obs 불러오기
         obs_history = self.env.get_observation_history() # obs history 불러오기
-        encoder_out = self.alg.encoder(obs_history) # obs history를 인코더에 통과 (latent 생성)
+        encoder_out = self.alg.encoder.encode(obs_history) # obs history를 인코더에 통과 (latent 생성)
         actor_obs = torch.cat((encoder_out, obs), dim=-1) # latent와 obs 합치기
         return self.alg.actor_critic.act_inference(actor_obs)
 
     def export(self, path):
         self.alg.actor_critic.export_policy(path)
+
+
+    # 학습 신경망 출력
+    def log_architecture(self):
+        # 색상 코드 정의
+        C = '\033[96m' # Cyan (테두리)
+        Y = '\033[93m' # Yellow (메인 타이틀)
+        G = '\033[92m' # Green (섹션 타이틀)
+        
+        # [핵심 수정] W를 '리셋'이 아니라 '선명한 색'으로 변경
+        W = '\033[97m' # Bright White (일반 텍스트용) -> 훨씬 쨍하게 보임!
+        # W = '\033[95m' # (취향에 따라 분홍색 등을 원하면 이걸 쓰세요)
+        
+        R = '\033[0m'  # Reset (줄 끝에서 색상을 끊어주기 위해 별도 정의)
+        B = '\033[1m'  # Bold
+
+        # 너비 설정
+        w_comp = 22
+        w_conf = 22
+        total_w = w_comp + w_conf + 7
+
+        # [수정] 줄 끝의 {W}를 {R}로 변경 (안 그러면 다음 줄까지 색이 번짐)
+        def print_row(comp, conf, color=W):
+            print(f"{C}| {color}{comp:^{w_comp}} {C}| {color}{conf:^{w_conf}} {C}|{R}")
+
+        def print_line():
+            print(f"{C}|{'-'*(w_comp+2)}|{'-'*(w_conf+2)}|{R}")
+        
+        def print_section_title(title):
+            print(f"{C}| {G}{B}{title:^{total_w-4}} {C}|{R}")
+            print_line()
+
+        # 1. 상단 테두리 & 메인 타이틀
+        print(f"\n{C}{'='*total_w}{R}")
+        print(f"{C}|{Y}{'WMR Framework':^{total_w-2}}{C}|{R}")
+        print(f"{C}|{'='*(total_w-2)}|{R}")
+        
+        # 2. 헤더
+        print(f"{C}| {Y}{'Component':^{w_comp}} {C}| {Y}{'Configuration':^{w_conf}} {C}|{R}")
+        print(f"{C}|{'='*(w_comp+2)}|{'='*(w_conf+2)}|{R}")
+
+        # ================== ESTIMATOR ==================
+        
+        # 3. History Encoder 섹션
+        print_section_title("History Encoder")
+
+        if hasattr(self.encoder, 'encoder'):
+            lstm = self.encoder.encoder
+            enc_conf = f"LSTM({lstm.input_size} -> {lstm.hidden_size})"
+        else:
+            enc_conf = "Unknown Encoder"
+            
+        print_row("RNN Memory", enc_conf)
+        print_line()
+
+        # 5. Continuous Decoder 섹션
+        print_section_title("Continuous Decoder")
+        
+        for i, layer in enumerate(self.encoder.decoder):
+            layer_str = str(layer)
+            if isinstance(layer, torch.nn.Linear):
+                layer_str = f"Linear({layer.in_features} -> {layer.out_features})"
+            elif isinstance(layer, torch.nn.ELU):
+                layer_str = f"ELU(alpha={layer.alpha})"
+            print_row(f"Con. Decoder ({i})", layer_str)
+        print_line()
+
+        # ================== ACTOR-CRITIC ==================
+
+        # 6. Locomotion Policy (Actor) 섹션
+        print_section_title("Locomotion Policy")
+        
+        for i, layer in enumerate(self.alg.actor_critic.actor.mean_NN):
+            layer_str = str(layer)
+            if isinstance(layer, torch.nn.Linear):
+                layer_str = f"Linear({layer.in_features} -> {layer.out_features})"
+            elif isinstance(layer, torch.nn.ELU):
+                layer_str = f"ELU(alpha={layer.alpha})"
+            print_row(f"Policy Net ({i})", layer_str)
+        print_line()
+
+        # 7. Value Network (Critic) 섹션
+        print_section_title("Value Network")
+        
+        for i, layer in enumerate(self.alg.actor_critic.critic.NN):
+            layer_str = str(layer)
+            if isinstance(layer, torch.nn.Linear):
+                layer_str = f"Linear({layer.in_features} -> {layer.out_features})"
+            elif isinstance(layer, torch.nn.ELU):
+                layer_str = f"ELU(alpha={layer.alpha})"
+            print_row(f"Value Net ({i})", layer_str)
+
+        # 8. 하단 테두리
+        print(f"{C}{'='*total_w}{R}\n")

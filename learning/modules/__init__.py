@@ -31,4 +31,4 @@
 from .actor_critic import ActorCritic
 from .actor import Actor
 from .critic import Critic
-from .mlp_encoder import MLP_Encoder
+from .estimator import WMR_Estimator

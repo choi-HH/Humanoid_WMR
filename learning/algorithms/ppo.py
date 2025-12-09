@@ -32,13 +32,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from learning.modules import MLP_Encoder
+from learning.modules import WMR_Estimator
 from learning.modules import ActorCritic
 from learning.storage import RolloutStorage
 
 class PPO:
     actor_critic: ActorCritic
-    encoder: MLP_Encoder
+    encoder: WMR_Estimator
 
     def __init__(self,
                  encoder,
@@ -124,7 +124,8 @@ class PPO:
         # Compute the actions and values
         
         # act
-        encoder_out = self.encoder(obs_history) # input obs_history --> encoder --> output latent vector
+        # encoder_out = self.encoder(obs_history) # input obs_history --> encoder --> output latent vector
+        encoder_out = self.encoder.encode(obs_history) # input obs_history --> encoder --> output latent vector
         # self.transition.actions = self.actor_critic.act(obs).detach()
         # encoder 출력값과 obs를 합쳐서 actor-critic 중 actor에 입력
         self.transition.actions = self.actor_critic.act(torch.cat((encoder_out, obs), dim=-1)).detach() # dim=-1: 데이터의 개수는 유지 하면서 마지막 차원 기준으로 합침
@@ -180,8 +181,12 @@ class PPO:
                 """
 
                 # encoder
-                encoder_out_batch = self.encoder(obs_history_batch) # obs_history를 통한 encoder batch 출력값
-                self.actor_critic.act(obs_batch) # actor 입력에 encoder 출력값이 합쳐진 obs 합쳐서 입력
+                # encoder_out_batch = self.encoder(obs_history_batch) # obs_history를 통한 encoder batch 출력값
+                encoder_out_batch = self.encoder.encode(obs_history_batch) # obs_history를 통한 encoder batch 출력값
+                latent_dim = encoder_out_batch.shape[-1] 
+                current_obs = obs_batch[:, latent_dim:]
+                input_batch = torch.cat((encoder_out_batch, current_obs), dim=-1) # encoder 출력값과 obs 합쳐서 actor-critic에 입력
+                self.actor_critic.act(input_batch) # actor 입력에 encoder 출력값이 합쳐진 obs 합쳐서 입력
 
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch)
@@ -291,35 +296,49 @@ class PPO:
         if self.extra_optimizer is not None:
             generator = self.storage.encoder_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs) # encoder 전용 미니배치 생성기
             for (critic_obs_batch, obs_history_batch) in generator:       
-                """
-                    critic_obs_batch: (128, critic_obs_dim), obs_history_batch: (128, obs_history_dim)
-                    정답지 critic_obs_batch
-                """
-                # encoder
-                if self.encoder.is_mlp_encoder:
-                    self.encoder.encode(obs_history_batch)
-                    encode_batch = self.encoder.get_encoder_out() # estimator의 output값인 lin vel을 encode_batch로 할당
+                # ------------------------------------------------------------------
+                # 정답지 Target
+                # ------------------------------------------------------------------
                 
-                if self.encoder.is_mlp_encoder:
-                    extra_loss = ((encode_batch - critic_obs_batch[:, 1:4]).pow(2).mean())
-                    # encoder가 예측한 base vel encode_batch와 실제 base vel(critic_obs_batch[:, 1:4]의 MSE
+                num_obs = self.encoder.num_obs_dim
+                batch_size = obs_history_batch.shape[0]
 
-                    with torch.no_grad():
-                        est_error = (encode_batch - critic_obs_batch[:, 1:4]).abs().mean() # base lin vel 예측 오차
-                    mean_lin_vel_est += est_error.item() # base lin vel 예측 오차 누적
+                # 현재 시점(t)의 관측값
+                # obs_history_batch: [Batch, num_input_dim] (Flattened History) -> [Batch, Seq_Len, Obs_Dim]
+                history_seq = obs_history_batch.view(batch_size, -1, num_obs)
+                target_obs = history_seq[:, -1, :] # 시퀀스의 맨 마지막(최신)값이 정답
 
-                    total_true_vel += critic_obs_batch[:, 1:4].mean(dim=0) # 실제 base lin vel 누적
-                    total_est_vel += encode_batch.mean(dim=0) # 예측 base lin vel 누적
-                    # print(f"true vel: {critic_obs_batch[:, 1:4].mean(dim=0)}")
-                    # print(f"est vel: {encode_batch.mean(dim=0)}")
+                # 실제 선속도
+                target_vel = critic_obs_batch[:, 1:4] # critic obs에서 선속도 부분만 추출
 
-                else:
-                    extra_loss = torch.zeros_like(value_loss) # encoder가 없는 경우 loss 0으로 설정
+                # ------------------------------------------------------------------
+                # Forward (예측)
+                # ------------------------------------------------------------------
+                self.encoder.encode(obs_history_batch) # encoder 순전파
+                decoder_out = self.encoder.get_decoder_out() # decoder 출력값 가져오기
+
+                # ------------------------------------------------------------------
+                # Loss 계산
+                # ------------------------------------------------------------------
+                pred_obs = decoder_out[:, :num_obs] # decoder가 복원한 관측값
+                pred_vel = decoder_out[:, num_obs:] # decoder가 추정한 선속도
+
+                loss_recon = (pred_obs - target_obs).pow(2).mean() # 관측값 복원 loss
+                loss_vel = (pred_vel - target_vel).pow(2).mean() # 선속도 추정 loss
+
+                # 최종 loss 계산 (논문의 Eq. 4)
+                extra_loss =loss_vel + 1.0 * loss_recon
                 
+                # ------------------------------------------------------------------
+                # Backward
+                # ------------------------------------------------------------------
                 self.extra_optimizer.zero_grad() # gradient 초기화(encoder 전용)
                 extra_loss.backward() # encoder loss에 대한 gradient 계산
                 self.extra_optimizer.step() # encoder 파라미터 갱신
 
+                with torch.no_grad():
+                    est_error = (pred_vel - target_vel).abs().mean()
+                
                 num_updates_extra += 1 # encoder 업데이트 횟수 누적
                 mean_extra_loss += extra_loss.item() # encoder loss 누적
 
