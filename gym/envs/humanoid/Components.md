@@ -9,5 +9,5 @@
 | Joint Positions | 12 | ✓ | ✓ | ✓ |
 | Joint Velocities | 12 | ✓ | ✓ | ✓ |
 | Base Height | 1 |  | ✓ | ✓ |
-| Base Linear velocity | 3 | | ✓ | ✓ |
+| Base velocity | 3 | | ✓ | ✓ |
 | **Total** | 40 | 36 | 40 | 40 |
