@@ -58,13 +58,18 @@ class OnPolicyRunner:
         self.device = device
         self.env = env
 
-        obs_history_list = self.est_cfg["obs_history"] # cfg에서 obs history 설정 불러오기
+        # obs_history_list = self.est_cfg["obs_history"] # cfg에서 obs history 설정 불러오기
+        obs_history_list = self.env.cfg.env.obs_history # env cfg에서 obs history 설정 불러오기
         num_obs_history_step = self.get_obs_size(obs_history_list) # step당 obs history 차원 계산
         obs_history_length = self.env.cfg.env.obs_history_length # obs history 길이
         num_input_dim = num_obs_history_step * obs_history_length # 전체 obs history 차원 계산
 
         self.est_cfg["num_input_dim"] = num_input_dim # WMR_Estimator 설정에 obs history 차원 반영
         self.est_cfg["num_obs_dim"] = num_obs_history_step # WMR_Estimator 설정에 obs history step 차원 반영
+
+        privileged_obs_list = self.est_cfg["privileged_obs"] # cfg에서 privileged obs 설정 불러오기
+        num_privileged_dim = self.get_obs_size(privileged_obs_list) # privileged obs 차원 계산
+        self.est_cfg["num_privileged_obs"] = num_privileged_dim # WMR_Estimator 설정에 privileged obs 차원 반영
 
         self.encoder = eval(self.cfg["estimator_class_name"])(**self.est_cfg).to(self.device) # WMR_Estimator 생성
         self.num_actor_obs = self.get_obs_size(self.policy_cfg["actor_obs"])
@@ -401,8 +406,8 @@ class OnPolicyRunner:
             enc_conf = f"LSTM({lstm.input_size} -> {lstm.hidden_size})"
         else:
             enc_conf = "Unknown Encoder"
-            
-        print_row("RNN Memory", enc_conf)
+        
+        print_row("RNN Memory (0)", enc_conf)
         print_line()
 
         # 5. Continuous Decoder 섹션

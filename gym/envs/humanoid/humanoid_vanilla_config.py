@@ -351,20 +351,10 @@ class HumanoidVanillaRunnerCfg(LeggedRobotRunnerCfg):
 
     class WMR_Estimator:
             # output_detach = True
-            # hidden_dims = [256, 256, 256]
+            hidden_dims = [256, 256]
             activation = 'elu'
-
-            obs_history = ["base_height",
-                           "base_heading",
-                           "base_ang_vel",
-                           "projected_gravity",
-                           "commands",
-                           "phase_sin",
-                           "phase_cos",
-                           "dof_pos",
-                           "dof_vel",] # encoder obs
-
             num_output_dim = 256
+            privileged_obs = ["base_lin_vel"]            
 
     class policy(LeggedRobotRunnerCfg.policy):
         init_noise_std = 1.0
@@ -374,26 +364,26 @@ class HumanoidVanillaRunnerCfg(LeggedRobotRunnerCfg):
         activation = 'elu'
         normalize_obs = True # True, False
 
-        actor_obs = ["base_height",
-                     "base_heading",
-                     "base_ang_vel",
-                     "projected_gravity",
-                     "commands",
-                     "phase_sin",
-                     "phase_cos",
-                     "dof_pos",
-                     "dof_vel",]
+        actor_obs = ["base_height",       # (1)
+                     "base_heading",      # (1)
+                     "base_ang_vel",      # (3)
+                     "projected_gravity", # (3)
+                     "commands",          # (3)
+                     "phase_sin",         # (1)
+                     "phase_cos",         # (1)
+                     "dof_pos",           # (12)
+                     "dof_vel",]          # (12) = (37)
 
-        critic_obs = ["base_height",
-                     "base_lin_vel_world", # "base_lin_vel",
-                     "base_heading",
-                     "base_ang_vel",
-                     "projected_gravity",
-                     "commands",
-                     "phase_sin",
-                     "phase_cos",
-                     "dof_pos",
-                     "dof_vel",]
+        critic_obs = ["base_height",        # (1)
+                     "base_lin_vel_world",  # (3)
+                     "base_heading",        # (1)
+                     "base_ang_vel",        # (3)
+                     "projected_gravity",   # (3)
+                     "commands",            # (3)
+                     "phase_sin",           # (1)
+                     "phase_cos",           # (1)
+                     "dof_pos",             # (12)
+                     "dof_vel"]             # (12)  = (40)
 
         actions = ["dof_pos_target"]
         class noise:

@@ -8,6 +8,7 @@ class WMR_Estimator(nn.Module):
                  num_input_dim,  # obs history 전체 차원
                  num_obs_dim,    # 현재 obs 차원
                  num_output_dim, # latent vector 차원
+                 num_privileged_dim, # privileged obs 차원
                  hidden_dims=[256, 256],
                  activation="elu",
                  **kwargs): # 추가 인자는 받지 않음
@@ -31,7 +32,7 @@ class WMR_Estimator(nn.Module):
             입력: Latent Vector
             출력: [Obs 복원 () + Lin Vel 추정(3)]
         """
-        self.decoder_output_dim = num_obs_dim + 3 # obs 복원 + lin vel 추정
+        self.decoder_output_dim = num_obs_dim + num_privileged_dim # obs 복원 + lin vel 추정
         self.decoder = create_MLP(num_inputs=num_output_dim,   
                                   num_outputs=self.decoder_output_dim,
                                   hidden_dims=hidden_dims,
